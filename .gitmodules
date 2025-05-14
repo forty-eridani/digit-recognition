@@ -1,0 +1,3 @@
+[submodule "linear-algebra-lib"]
+	path = linear-algebra-lib
+	url = https://github.com/forty-eridani/linear-algebra-lib

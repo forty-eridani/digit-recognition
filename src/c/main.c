@@ -1,16 +1,13 @@
 #include <stdio.h>
-#include "matrix.h"
+
+#include "network.h"
 
 int main() {
-	double marr[] = {
-		1, 2, 3,
-		4, 5, 6,
-		7, 8, 9
-	};
+	int layers[] = {5, 4, 3};
+	Network network = CreateNetwork(layers, 3);
 
-	Matrix m = CreateMatrix(marr, 3, 3);
-
-	PrintMatrix(m);
-
-	FreeMatrix(&m);
+	for (int i = 0; i < 2; i++) {
+		PrintMatrix(network.layers[i]);
+		printf("\n");
+	}
 }

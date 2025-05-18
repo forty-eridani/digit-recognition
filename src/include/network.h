@@ -20,8 +20,8 @@ Vector CalculateVectorCost(Vector observed, Vector expected);
 // includes input size
 Network CreateNetwork(int* layers, int layerCount);
 
-// Returns a vector representing the output
-Vector FeedForward(Network* network, Vector input);
+// Returns a vector representing the output. `currentLayer` should start at zero if input is truly input. Input must have heap allocated memory
+Vector FeedForward(Network network, Vector input, int currentLayer);
 
 // Frees the memory in the network and sets all 
 void FreeNetwork(Network* network);

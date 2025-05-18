@@ -12,7 +12,7 @@ int main() {
 		printf("\n");
 	}
 
-	double vectorMatrixInput[] = {1.0, 0.5, 0.0, 0.23, 0.65};
+	double vectorMatrixInput[] = {1.0, 1.0, 1.0, 1.0, 1.0};
 	Vector input = CreateVectorWithElements(vectorMatrixInput, 5);
 
 	Vector output = FeedForward(network, input, 0);

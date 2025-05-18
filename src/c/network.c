@@ -18,11 +18,11 @@ static void fillArrayRandom(double arr[], int count) {
 }
 
 static double relu(double value) {
-	return value ? value > 0 : 0;
+	return value > 0 ? value : 0;
 }
 
 static double reluPrime(double x) {
-	return 1 ? x > 0 : 0;
+	return x > 0 ? 1 : 0;
 }
 
 static void softmax(Vector v) {
@@ -78,6 +78,9 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 	assert(network.layers);
 	assert(network.biases);
 
+	printf("Input on layer %d\n", currentLayer);
+	PrintVector(input);
+
 	// We have traversed through all of the layers
 	if (currentLayer == network.neuronLayerCount)
 		return input;
@@ -105,6 +108,7 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 		if (currentLayer == network.neuronLayerCount - 1) {
 			currentActivation.data[i] = z;
 		} else {
+			printf("ReLU is %f, z is %f\n", relu(z), z);
 			currentActivation.data[i] = relu(z);
 		}
 

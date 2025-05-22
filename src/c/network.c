@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define ERROR_OUTPUT (Vector){.size = 0, .data = NULL}
@@ -13,12 +14,18 @@ static void fillArrayRandom(double arr[], int count) {
 	srand(time(NULL));
 
 	for (int i = 0; i < count; i++) {
-		arr[i] = (double)rand() / RAND_MAX;
+		arr[i] = 1.0;
+		// arr[i] = (double)rand() / RAND_MAX;
 	}
 }
 
 static double relu(double value) {
 	return value > 0 ? value : 0;
+}
+
+static void vectorRelu(Vector vector) {
+	for (int i = 0; i < vector.size; i++)
+		vector.data[i] = relu(vector.data[i]);
 }
 
 static double reluPrime(double x) {
@@ -77,6 +84,7 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 	assert(input.data);
 	assert(network.layers);
 	assert(network.biases);
+	assert(currentLayer >= 0 && currentLayer <= network.neuronLayerCount);
 
 	printf("Input on layer %d\n", currentLayer);
 	PrintVector(input);
@@ -90,34 +98,14 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 		return ERROR_OUTPUT;	
 	}
 
-	int activationSize = network.layers[currentLayer].rows;
+	Vector currentActivation = MultiplyMatrixToVector(network.layers[currentLayer], input);
+	AddVectorsInPlace(network.biases[currentLayer], &currentActivation);
 
-	Vector currentActivation = {.size = activationSize,
-								.data = malloc(activationSize * sizeof(double))};
-
-	for (int i = 0; i < activationSize; i++) {
-		// We do a microplastic amount of memory tomfoolery
-		const double* rowAddr = network.layers[currentLayer].data + network.layers[currentLayer].cols * i;
-
-		Vector weightedActivations = CreateVector(rowAddr, input.size);
-		MultiplyVectorsInPlace(input, &weightedActivations);
-
-		double z = VectorSum(weightedActivations) + network.biases[currentLayer].data[i];
-
-		// This means we are on the output layer and only want to apply softmax to the z values
-		if (currentLayer == network.neuronLayerCount - 1) {
-			currentActivation.data[i] = z;
-		} else {
-			printf("ReLU is %f, z is %f\n", relu(z), z);
-			currentActivation.data[i] = relu(z);
-		}
-
-		FreeVector(&weightedActivations);
-	}
-
-	if (currentLayer == network.neuronLayerCount - 1) {
+	if (currentLayer < network.neuronLayerCount - 1) 
+		vectorRelu(currentActivation);
+	else {
 		softmax(currentActivation);
-		printf("To prove softmax works, this number should be 1: %f\n", VectorSum(currentActivation));
+		// printf("To prove softmax works, this number should be 1: %f\n", VectorSum(currentActivation));
 	}
 
 	// The caller has ownership over the initial input so we don't want to free that
@@ -125,6 +113,70 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 		FreeVector(&input);
 
 	return FeedForward(network, currentActivation, currentLayer + 1);
+}
+
+static void freeVectorArray(Vector* array, int size) {
+	for (int i = 0; i < size; i++) 
+		FreeVector(&array[i]);
+
+	free(array);
+}
+
+static Vector copyVector(Vector src) {
+	Vector new = src;
+	new.data = malloc(src.size * sizeof(double));
+	memcpy(new.data, src.data, src.size * sizeof(double));
+
+	return new;
+}
+
+static Vector* recordFeedForward(Network network, Vector* activations, Vector input, int depth) {
+	assert(network.biases);
+	assert(network.layers);
+	assert(input.data);
+	assert(depth >= 0 && depth <= network.neuronLayerCount);
+
+	if (activations == NULL)
+		// We must include the input vector
+		activations = malloc((network.neuronLayerCount + 1) * sizeof(Vector));
+
+	if (depth == 0) {
+		activations[depth] = input;
+		activations[depth].data = malloc(input.size * sizeof(double));
+		memcpy(activations[depth].data, input.data, input.size * sizeof(double));
+	} else {
+		activations[depth] = input;
+	}
+
+	if (depth == network.neuronLayerCount)
+		return activations;
+
+	if (input.size != network.layers[depth].cols) {
+		printf("Input dimensions do not match that of neural network.\n");
+		return NULL;	
+	}
+
+	Vector currentActivations = MultiplyMatrixToVector(network.layers[depth], input);
+	AddVectorsInPlace(network.biases[depth], &currentActivations);
+
+	if (depth < network.neuronLayerCount - 1) 
+		vectorRelu(currentActivations);
+	else
+		softmax(currentActivations);
+
+	return recordFeedForward(network, activations, currentActivations, depth + 1);
+}
+
+
+void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count) {
+	Vector* feedForwardData = recordFeedForward(network, NULL, *trainingInputs, 0);
+
+	for (int i = 0; i < network.neuronLayerCount + 1; i++) {
+		PrintVector(feedForwardData[i]);
+		printf("\n");
+	}
+
+	freeVectorArray(feedForwardData, network.neuronLayerCount + 1);
 }
 
 void FreeNetwork(Network* network) {

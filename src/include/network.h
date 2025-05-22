@@ -23,6 +23,9 @@ Network CreateNetwork(int* layers, int layerCount);
 // Returns a vector representing the output. `currentLayer` should start at zero if input is truly input. Caller is still in charge of freeing input
 Vector FeedForward(Network network, Vector input, int currentLayer);
 
+// Back propagate with the given array of training inputs and expected outputs
+void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count);
+
 // Frees the memory in the network and sets all 
 void FreeNetwork(Network* network);
 

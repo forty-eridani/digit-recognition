@@ -3,22 +3,15 @@
 #include "network.h"
 
 int main() {
-	int layers[] = {5, 4, 3};
-	Network network = CreateNetwork(layers, 3);
+	int layers[] = {5, 4, 3, 2, 1};
+	Network network = CreateNetwork(layers, 5);
 
-	for (int i = 0; i < 2; i++) {
-		PrintMatrix(network.layers[i]);
-		PrintVector(network.biases[i]);
-		printf("\n");
-	}
-
-	double vectorMatrixInput[] = {1.0, 1.0, 1.0, 1.0, 1.0};
+	double vectorMatrixInput[5] = {1.0, 2.0, 3.0, 4.0, 5.0};
 	Vector input = CreateVectorWithElements(vectorMatrixInput, 5);
 
-	Vector output = FeedForward(network, input, 0);
+	BackPropagate(network, &input, NULL, 1);
 
-	PrintVector(output);
+	printf("Output\n");
 
-	FreeVector(&output);
 	FreeNetwork(&network);
 }

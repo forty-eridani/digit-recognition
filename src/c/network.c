@@ -1,5 +1,6 @@
 #include "network.h"
 #include "matrix.h"
+#include "vector.h"
 
 #include <assert.h>
 #include <math.h>
@@ -8,40 +9,66 @@
 #include <string.h>
 #include <time.h>
 
-#define ERROR_OUTPUT (Vector){.size = 0, .data = NULL}
+#define EMPTY_VECTOR (Vector){.size = 0, .data = NULL}
+
+typedef struct {
+	Matrix* gradientMatrices;
+	int count;
+} Gradient;
+
+static void printGradient(Gradient gradient) {
+	printf("Gradient:\n");
+	for (int i = 0; i < gradient.count; i++) {
+		printf("Layer %d\n", i);
+		PrintMatrix(gradient.gradientMatrices[i]);
+	}
+}
+
+static void freeGradient(Gradient* gradient) {
+	assert(gradient);
+	assert(gradient->gradientMatrices);
+
+	for (int i = 0; i < gradient->count; i++)
+		FreeMatrix(&gradient->gradientMatrices[i]);
+}
 
 static void fillArrayRandom(double arr[], int count) {
 	srand(time(NULL));
 
 	for (int i = 0; i < count; i++) {
-		arr[i] = 1.0;
-		// arr[i] = (double)rand() / RAND_MAX;
+		arr[i] = (double)rand() / RAND_MAX;
 	}
 }
 
-static double relu(double value) {
-	return value > 0 ? value : 0;
+static double sigmoid(double x) {
+	return 1 / (1 + exp(-x));
 }
 
-static void vectorRelu(Vector vector) {
-	for (int i = 0; i < vector.size; i++)
-		vector.data[i] = relu(vector.data[i]);
+static double sigmoidPrime(double x) {
+	return sigmoid(x) * (1 - sigmoid(x));
 }
 
-static double reluPrime(double x) {
-	return x > 0 ? 1 : 0;
+static double mse(double expected, double observed) {
+	return (expected - observed) * (expected - observed);
 }
 
-static void softmax(Vector v) {
-	for (int i = 0; i < v.size; i++) {
-		v.data[i] = exp(v.data[i]);
+static double msePrime(double expected, double observed) {
+	// The simplified derivative; if just using chain rule you get 2 * (expected - observed) * -1
+	return 2 * (observed - expected);
+}
+
+static Vector vectorMsePrime(Vector expected, Vector observed) {
+	assert(expected.size == observed.size);
+	assert(expected.data);
+	assert(observed.data);
+
+	double arr[expected.size];
+
+	for (int i = 0; i < expected.size; i++) {
+		arr[i] = msePrime(expected.data[i], observed.data[i]);
 	}
 
-	double sum = VectorSum(v);
-
-	for (int i = 0; i < v.size; i++) {
-		v.data[i] = v.data[i] / sum;
-	}
+	return CreateVector(arr, expected.size);
 }
 
 Vector CalculateVectorCost(Vector observed, Vector expected) {
@@ -77,6 +104,9 @@ Network CreateNetwork(int* layers, int layerCount) {
 		network.biases[i] = CreateVector(biases, layers[i + 1]);
 	}
 
+	network.inputSize = layers[0];
+	network.outputSize = layers[layerCount - 1];
+
 	return network;
 }
 
@@ -95,18 +125,11 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 
 	if (input.size != network.layers[currentLayer].cols) {
 		printf("Input dimensions do not match that of neural network.\n");
-		return ERROR_OUTPUT;	
+		return EMPTY_VECTOR;	
 	}
 
 	Vector currentActivation = MultiplyMatrixToVector(network.layers[currentLayer], input);
 	AddVectorsInPlace(network.biases[currentLayer], &currentActivation);
-
-	if (currentLayer < network.neuronLayerCount - 1) 
-		vectorRelu(currentActivation);
-	else {
-		softmax(currentActivation);
-		// printf("To prove softmax works, this number should be 1: %f\n", VectorSum(currentActivation));
-	}
 
 	// The caller has ownership over the initial input so we don't want to free that
 	if (currentLayer != 0)
@@ -140,6 +163,7 @@ static Vector* recordFeedForward(Network network, Vector* activations, Vector in
 		// We must include the input vector
 		activations = malloc((network.neuronLayerCount + 1) * sizeof(Vector));
 
+	// We still want the caller to have ownership over the original input
 	if (depth == 0) {
 		activations[depth] = input;
 		activations[depth].data = malloc(input.size * sizeof(double));
@@ -151,6 +175,8 @@ static Vector* recordFeedForward(Network network, Vector* activations, Vector in
 	if (depth == network.neuronLayerCount)
 		return activations;
 
+	assert(input.size == network.layers[depth].cols);
+
 	if (input.size != network.layers[depth].cols) {
 		printf("Input dimensions do not match that of neural network.\n");
 		return NULL;	
@@ -159,24 +185,92 @@ static Vector* recordFeedForward(Network network, Vector* activations, Vector in
 	Vector currentActivations = MultiplyMatrixToVector(network.layers[depth], input);
 	AddVectorsInPlace(network.biases[depth], &currentActivations);
 
-	if (depth < network.neuronLayerCount - 1) 
-		vectorRelu(currentActivations);
-	else
-		softmax(currentActivations);
+	ApplyFunctionToVector(currentActivations, &sigmoid);
 
 	return recordFeedForward(network, activations, currentActivations, depth + 1);
 }
 
+// Pass in `EMPTY_VECTOR` for `curInfluence` initial call so it can be calculated
+static Gradient computeGradient(Network network, Vector trainingDatum, Vector expectedOutput, 
+		Vector* recordedActivations, Matrix* gradient, Vector curInfluence, int depth) {
+	assert(network.layers);
+	assert(network.biases);
+	assert(trainingDatum.data);
+	assert(expectedOutput.data);
+	
+	assert(trainingDatum.size == network.inputSize);
+	assert(expectedOutput.size == network.outputSize);
 
-void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count) {
-	Vector* feedForwardData = recordFeedForward(network, NULL, *trainingInputs, 0);
+	if (gradient == NULL) {
+		gradient = malloc(network.neuronLayerCount * sizeof(Matrix));
 
-	for (int i = 0; i < network.neuronLayerCount + 1; i++) {
-		PrintVector(feedForwardData[i]);
-		printf("\n");
+		for (int i = 0; i < network.neuronLayerCount; i++)
+			gradient[i] = CreateMatrixWithZeros(network.layers[i].rows, network.layers[i].cols);
 	}
 
-	freeVectorArray(feedForwardData, network.neuronLayerCount + 1);
+	if (recordedActivations == NULL) 
+		recordedActivations = recordFeedForward(network, NULL, trainingDatum, 0);
+
+	if (curInfluence.data == NULL)
+		curInfluence = vectorMsePrime(expectedOutput, recordedActivations[network.neuronLayerCount]);
+
+	if (depth == network.neuronLayerCount) {
+		freeVectorArray(recordedActivations, network.neuronLayerCount + 1);
+		return (Gradient){.count = depth, .gradientMatrices = gradient};
+	}
+
+	int activationIndex = network.neuronLayerCount - depth - 1;
+	int inputCount = network.layers[activationIndex].cols;
+
+	Vector nextInfluences = CreateVectorWithZeros(inputCount);
+
+	for (int i = 0; i < network.layers[activationIndex].rows; i++) {
+		double* rowArr = network.layers[activationIndex].data + (i * inputCount);
+		double z = VectorSum(CreateVectorWithElements(rowArr, inputCount)) + network.biases[activationIndex].data[i];
+
+		double curNeuronInfluence = curInfluence.data[i];
+
+		for (int j = 0; j < inputCount; j++) {
+			// Prev activation never applies to the output layer so this is valid
+			double prevActivation = recordedActivations[activationIndex].data[j];
+
+			double weightInfluence = prevActivation * sigmoidPrime(z) * curNeuronInfluence;
+
+			gradient[activationIndex].data[i * inputCount + j] += weightInfluence;
+
+			// A little bit confusing naming, but "next" refers to the next neuron to have its
+			// gradient computed, not "next" as in the next neuron to process this one's activation
+			// (like in feedforward). Also just as a reminder the layers matrix stores weights
+			nextInfluences.data[j] += network.layers[activationIndex].data[i * inputCount + j] * sigmoidPrime(z) * curNeuronInfluence;
+		}
+	}
+
+	FreeVector(&curInfluence);
+
+	return computeGradient(network, trainingDatum, expectedOutput, recordedActivations, gradient, nextInfluences, depth + 1);
+}
+
+void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count) {
+	Vector trainInput = CreateEmptyVector(network.inputSize);
+	fillArrayRandom(trainInput.data, trainInput.size);
+
+	Vector expectedOutput = CreateVectorWithZeros(network.outputSize);
+
+	Gradient calculatedGradient = computeGradient(network, trainInput, expectedOutput, NULL, NULL, EMPTY_VECTOR, 0);
+
+	printf("Count: %d\n", calculatedGradient.count);
+
+	printGradient(calculatedGradient);
+
+	Vector* ff = recordFeedForward(network, NULL, trainInput, 0);
+
+	for (int i = 0; i < network.neuronLayerCount + 1; i++) {
+		printf("\n");
+		PrintVector(ff[i]);
+	}
+
+	FreeVector(&trainInput);
+	FreeVector(&expectedOutput);
 }
 
 void FreeNetwork(Network* network) {

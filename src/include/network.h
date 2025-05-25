@@ -11,6 +11,10 @@ typedef struct {
 
 	// Does not include input neurons
 	int neuronLayerCount;
+
+	// Stored in matrix dimensions in layers as well, but code becomes unclear
+	int inputSize;
+	int outputSize;
 } Network;
 
 // Calculates the MSE of the observed value (y hat) and the expected value (y) 

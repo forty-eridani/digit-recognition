@@ -15,6 +15,8 @@ typedef struct {
 	// Stored in matrix dimensions in layers as well, but code becomes unclear
 	int inputSize;
 	int outputSize;
+
+	double learningRate;
 } Network;
 
 // Calculates the MSE of the observed value (y hat) and the expected value (y) 
@@ -22,7 +24,7 @@ Vector CalculateVectorCost(Vector observed, Vector expected);
 
 // Initializes a neural network with random weights and biases. Layer array
 // includes input size
-Network CreateNetwork(int* layers, int layerCount);
+Network CreateNetwork(int* layers, int layerCount, double learningRate);
 
 // Returns a vector representing the output. `currentLayer` should start at zero if input is truly input. Caller is still in charge of freeing input
 Vector FeedForward(Network network, Vector input, int currentLayer);

@@ -13,6 +13,7 @@
 
 typedef struct {
 	Matrix* gradientMatrices;
+	Vector* gradientVectors;
 	int count;
 } Gradient;
 
@@ -28,15 +29,19 @@ static void freeGradient(Gradient* gradient) {
 	assert(gradient);
 	assert(gradient->gradientMatrices);
 
-	for (int i = 0; i < gradient->count; i++)
+	for (int i = 0; i < gradient->count; i++) {
 		FreeMatrix(&gradient->gradientMatrices[i]);
+		FreeVector(&gradient->gradientVectors[i]);
+	}
+
+	free(gradient->gradientVectors);
+	free(gradient->gradientMatrices);
 }
 
 static void fillArrayRandom(double arr[], int count) {
-	srand(time(NULL));
-
 	for (int i = 0; i < count; i++) {
-		arr[i] = (double)rand() / RAND_MAX;
+		arr[i] = ((double)rand() / RAND_MAX - 0.5) * 2;
+		// arr[i] = 0.5;
 	}
 }
 
@@ -55,6 +60,19 @@ static double mse(double expected, double observed) {
 static double msePrime(double expected, double observed) {
 	// The simplified derivative; if just using chain rule you get 2 * (expected - observed) * -1
 	return 2 * (observed - expected);
+}
+
+static double totalCost(Vector expected, Vector observed) {
+	assert(expected.data);
+	assert(observed.data);
+	assert(observed.size == expected.size);
+
+	double sum = 0.0;
+
+	for (int i = 0; i < observed.size; i++)
+		sum += mse(expected.data[i], observed.data[i]);
+
+	return sum;
 }
 
 static Vector vectorMsePrime(Vector expected, Vector observed) {
@@ -78,17 +96,20 @@ Vector CalculateVectorCost(Vector observed, Vector expected) {
 	return r;
 }
 
-Network CreateNetwork(int* layers, int layerCount) {
+Network CreateNetwork(int* layers, int layerCount, double learningRate) {
 	// The network is represented by a bunch of adjacency matrices 
 	// Each column represents the layer ahead, and each row represents
 	// the neuron that it leads to. Each cell in the matrix represents a
 	// weight.
 	
 	assert(layers);
+
+	srand(time(NULL));
 	
 	Network network = {.neuronLayerCount = layerCount - 1, 
 					   .layers = malloc((layerCount - 1) * sizeof(Matrix)),
-	                   .biases = malloc((layerCount - 1) * sizeof(Vector))};
+	                   .biases = malloc((layerCount - 1) * sizeof(Vector)),
+					   .learningRate = learningRate};
 
 	
 	for (int i = 0; i < layerCount - 1; i++) {
@@ -116,8 +137,8 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 	assert(network.biases);
 	assert(currentLayer >= 0 && currentLayer <= network.neuronLayerCount);
 
-	printf("Input on layer %d\n", currentLayer);
-	PrintVector(input);
+	// printf("Input on layer %d\n", currentLayer);
+	// PrintVector(input);
 
 	// We have traversed through all of the layers
 	if (currentLayer == network.neuronLayerCount)
@@ -130,6 +151,7 @@ Vector FeedForward(Network network, Vector input, int currentLayer) {
 
 	Vector currentActivation = MultiplyMatrixToVector(network.layers[currentLayer], input);
 	AddVectorsInPlace(network.biases[currentLayer], &currentActivation);
+	ApplyFunctionToVector(currentActivation, &sigmoid);
 
 	// The caller has ownership over the initial input so we don't want to free that
 	if (currentLayer != 0)
@@ -192,7 +214,7 @@ static Vector* recordFeedForward(Network network, Vector* activations, Vector in
 
 // Pass in `EMPTY_VECTOR` for `curInfluence` initial call so it can be calculated
 static Gradient computeGradient(Network network, Vector trainingDatum, Vector expectedOutput, 
-		Vector* recordedActivations, Matrix* gradient, Vector curInfluence, int depth) {
+		Vector* recordedActivations, Matrix* gradientWeights, Vector *gradientBiases, Vector curInfluence, int depth) {
 	assert(network.layers);
 	assert(network.biases);
 	assert(trainingDatum.data);
@@ -201,11 +223,14 @@ static Gradient computeGradient(Network network, Vector trainingDatum, Vector ex
 	assert(trainingDatum.size == network.inputSize);
 	assert(expectedOutput.size == network.outputSize);
 
-	if (gradient == NULL) {
-		gradient = malloc(network.neuronLayerCount * sizeof(Matrix));
+	if (gradientWeights == NULL || gradientBiases == NULL) {
+		gradientWeights = malloc(network.neuronLayerCount * sizeof(Matrix));
+		gradientBiases = malloc(network.neuronLayerCount * sizeof(Vector));
 
-		for (int i = 0; i < network.neuronLayerCount; i++)
-			gradient[i] = CreateMatrixWithZeros(network.layers[i].rows, network.layers[i].cols);
+		for (int i = 0; i < network.neuronLayerCount; i++) {
+			gradientWeights[i] = CreateMatrixWithZeros(network.layers[i].rows, network.layers[i].cols);
+			gradientBiases[i] = CreateVectorWithZeros(network.layers[i].rows);
+		}
 	}
 
 	if (recordedActivations == NULL) 
@@ -216,7 +241,8 @@ static Gradient computeGradient(Network network, Vector trainingDatum, Vector ex
 
 	if (depth == network.neuronLayerCount) {
 		freeVectorArray(recordedActivations, network.neuronLayerCount + 1);
-		return (Gradient){.count = depth, .gradientMatrices = gradient};
+		FreeVector(&curInfluence);
+		return (Gradient){.count = depth, .gradientMatrices = gradientWeights, .gradientVectors = gradientBiases};
 	}
 
 	int activationIndex = network.neuronLayerCount - depth - 1;
@@ -225,29 +251,35 @@ static Gradient computeGradient(Network network, Vector trainingDatum, Vector ex
 	Vector nextInfluences = CreateVectorWithZeros(inputCount);
 
 	for (int i = 0; i < network.layers[activationIndex].rows; i++) {
-		double* rowArr = network.layers[activationIndex].data + (i * inputCount);
-		double z = VectorSum(CreateVectorWithElements(rowArr, inputCount)) + network.biases[activationIndex].data[i];
-
+		double* rowAddr = network.layers[activationIndex].data + (i * inputCount);
+		Vector weightedActivations = MultiplyVectors(CreateVectorWithElements(rowAddr, inputCount), recordedActivations[activationIndex]);
+		double z = VectorSum(weightedActivations) + network.biases[activationIndex].data[i];
 		double curNeuronInfluence = curInfluence.data[i];
+
+		FreeVector(&weightedActivations);
+
+		double zPrime = sigmoidPrime(z);
+		
+		gradientBiases[activationIndex].data[i] = zPrime * curNeuronInfluence;
 
 		for (int j = 0; j < inputCount; j++) {
 			// Prev activation never applies to the output layer so this is valid
 			double prevActivation = recordedActivations[activationIndex].data[j];
 
-			double weightInfluence = prevActivation * sigmoidPrime(z) * curNeuronInfluence;
+			double weightInfluence = prevActivation * zPrime * curNeuronInfluence;
 
-			gradient[activationIndex].data[i * inputCount + j] += weightInfluence;
+			gradientWeights[activationIndex].data[i * inputCount + j] += weightInfluence;
 
 			// A little bit confusing naming, but "next" refers to the next neuron to have its
 			// gradient computed, not "next" as in the next neuron to process this one's activation
 			// (like in feedforward). Also just as a reminder the layers matrix stores weights
-			nextInfluences.data[j] += network.layers[activationIndex].data[i * inputCount + j] * sigmoidPrime(z) * curNeuronInfluence;
+			nextInfluences.data[j] += network.layers[activationIndex].data[i * inputCount + j] * zPrime * curNeuronInfluence;
 		}
 	}
 
 	FreeVector(&curInfluence);
 
-	return computeGradient(network, trainingDatum, expectedOutput, recordedActivations, gradient, nextInfluences, depth + 1);
+	return computeGradient(network, trainingDatum, expectedOutput, recordedActivations, gradientWeights, gradientBiases, nextInfluences, depth + 1);
 }
 
 void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count) {
@@ -256,17 +288,23 @@ void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutp
 
 	Vector expectedOutput = CreateVectorWithZeros(network.outputSize);
 
-	Gradient calculatedGradient = computeGradient(network, trainInput, expectedOutput, NULL, NULL, EMPTY_VECTOR, 0);
+	for (int i = 0; i < 1000; i++) {
 
-	printf("Count: %d\n", calculatedGradient.count);
+		Gradient gradient = computeGradient(network, trainInput, expectedOutput, NULL, NULL, NULL, EMPTY_VECTOR, 0);
 
-	printGradient(calculatedGradient);
+		for (int i = 0; i < gradient.count; i++) {
+			ApplyScalarToMatrixInPlace(&gradient.gradientMatrices[i], -network.learningRate);
+			AddMatricesInPlace(gradient.gradientMatrices[i], &network.layers[i]);
 
-	Vector* ff = recordFeedForward(network, NULL, trainInput, 0);
+			ApplyScalarToVectorInPlace(&gradient.gradientVectors[i], -network.learningRate);
+			AddVectorsInPlace(gradient.gradientVectors[i], &network.biases[i]);
+		}
 
-	for (int i = 0; i < network.neuronLayerCount + 1; i++) {
-		printf("\n");
-		PrintVector(ff[i]);
+		Vector feedForwardResult = FeedForward(network, trainInput, 0);
+		printf("Cost after epoch %d: %f\n", i, totalCost(expectedOutput, feedForwardResult));
+
+		FreeVector(&feedForwardResult);
+		freeGradient(&gradient);
 	}
 
 	FreeVector(&trainInput);

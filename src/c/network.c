@@ -34,8 +34,41 @@ static void freeGradient(Gradient* gradient) {
 		FreeVector(&gradient->gradientVectors[i]);
 	}
 
+	gradient->count = 0;
+
 	free(gradient->gradientVectors);
 	free(gradient->gradientMatrices);
+}
+
+static Gradient averageGradients(Gradient* gradients, int count) {
+	assert(gradients);
+	assert(count > 0);
+
+	int layerCount = gradients[0].count;
+
+	double scalar = 1 / (double)count;
+
+	Gradient sum = {.count = layerCount, .gradientMatrices = malloc(layerCount * sizeof(Matrix)), 
+		.gradientVectors = malloc(layerCount * sizeof(Vector))};
+
+	for (int i = 0; i < sum.count; i++) {
+		sum.gradientMatrices[i] = CreateMatrixWithZeros(gradients[0].gradientMatrices[i].rows, gradients[0].gradientMatrices[i].cols);
+		sum.gradientVectors[i] = CreateVectorWithZeros(gradients[0].gradientVectors[i].size);
+	}
+
+	for (int i = 0; i < count; i++) {
+		for (int j = 0; j < gradients[0].count; j++) {
+			AddMatricesInPlace(gradients[i].gradientMatrices[j], &sum.gradientMatrices[j]);
+			AddVectorsInPlace(gradients[i].gradientVectors[j], &sum.gradientVectors[j]);
+		}
+	}
+
+	for (int i = 0; i < sum.count; i++) {
+		ApplyScalarToMatrixInPlace(&sum.gradientMatrices[i], scalar);
+		ApplyScalarToVectorInPlace(&sum.gradientVectors[i], scalar);
+	}
+
+	return sum;
 }
 
 static void fillArrayRandom(double arr[], int count) {
@@ -283,32 +316,27 @@ static Gradient computeGradient(Network network, Vector trainingDatum, Vector ex
 }
 
 void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count) {
-	Vector trainInput = CreateEmptyVector(network.inputSize);
-	fillArrayRandom(trainInput.data, trainInput.size);
+	Gradient gradientArr[count];
 
-	Vector expectedOutput = CreateVectorWithZeros(network.outputSize);
+	for (int i = 0; i < count; i++)
+		gradientArr[i] = computeGradient(network, trainingInputs[i], expectedOutputs[i], NULL, NULL, NULL, EMPTY_VECTOR, 0);
 
-	for (int i = 0; i < 1000; i++) {
+	Gradient avg = averageGradients(gradientArr, count);
 
-		Gradient gradient = computeGradient(network, trainInput, expectedOutput, NULL, NULL, NULL, EMPTY_VECTOR, 0);
+	assert(avg.count == network.neuronLayerCount);
 
-		for (int i = 0; i < gradient.count; i++) {
-			ApplyScalarToMatrixInPlace(&gradient.gradientMatrices[i], -network.learningRate);
-			AddMatricesInPlace(gradient.gradientMatrices[i], &network.layers[i]);
+	for (int i = 0; i < count; i++)
+		freeGradient(&gradientArr[i]);
 
-			ApplyScalarToVectorInPlace(&gradient.gradientVectors[i], -network.learningRate);
-			AddVectorsInPlace(gradient.gradientVectors[i], &network.biases[i]);
-		}
+	for (int i = 0; i < avg.count; i++) {
+		ApplyScalarToMatrixInPlace(&avg.gradientMatrices[i], -network.learningRate);
+		ApplyScalarToVectorInPlace(&avg.gradientVectors[i], -network.learningRate);
 
-		Vector feedForwardResult = FeedForward(network, trainInput, 0);
-		printf("Cost after epoch %d: %f\n", i, totalCost(expectedOutput, feedForwardResult));
-
-		FreeVector(&feedForwardResult);
-		freeGradient(&gradient);
+		AddMatricesInPlace(avg.gradientMatrices[i], &network.layers[i]);
+		AddVectorsInPlace(avg.gradientVectors[i], &network.biases[i]);
 	}
 
-	FreeVector(&trainInput);
-	FreeVector(&expectedOutput);
+	freeGradient(&avg);
 }
 
 void FreeNetwork(Network* network) {

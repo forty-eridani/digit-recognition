@@ -6,6 +6,7 @@
 #include <math.h>
 
 #include "network.h"
+#include "mnist.h"
 
 #define POINT_TRAIN_AMOUNT 1024
 #define POINT_TEST_AMOUNT 1024 
@@ -16,7 +17,7 @@
 #define PI 3.141592653589793
 
 #define MINI_BATCH_SIZE 16
-#define EPOCH_COUNT 100
+#define EPOCH_COUNT 1000
 
 double RaiseToTwo(double x) {
 	return x * x;
@@ -98,7 +99,7 @@ void PointClassification() {
 
 	int layers[] = {2, 5, 5, 2};
 
-	Network network = CreateNetwork(layers, 4, 1.0);
+	Network network = CreateNetwork(layers, 4, 0.4);
 
 	for (int i = 0; i < EPOCH_COUNT; i++) {
 		// We use mini-batch descent
@@ -180,5 +181,7 @@ int main() {
 	// FreeVector(&zeros);
 	// FreeVector(&v);
 	
-	PointClassification();
+	// PointClassification();
+	
+	RecognizeDigits();
 }

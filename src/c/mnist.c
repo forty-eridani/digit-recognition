@@ -8,10 +8,10 @@
 
 #include "network.h"
 
-#define EPOCH_AMOUNT 64
+#define EPOCH_AMOUNT 128
 #define MINI_BATCH_SIZE 100
 
-#define LEARNING_RATE 4.0
+#define LEARNING_RATE 5.0
 
 static uint16_t swapLsb(uint16_t n) {
 	uint8_t most = n;
@@ -56,7 +56,7 @@ Vector* readVectorFile(const char* filename, int* size, int magicNumber) {
 	*size = imageCount;
 
 	for (int i = 0; i < imageCount; i++) {
-		uint8_t buf[imageHeight * imageWidth];
+		uint8_t* buf = malloc(imageHeight * imageWidth * sizeof(uint8_t));
 
 		fread(buf, sizeof(uint8_t), imageHeight * imageWidth, fptr);
 
@@ -66,6 +66,7 @@ Vector* readVectorFile(const char* filename, int* size, int magicNumber) {
 			v.data[j] = (double)buf[j] / 255;
 		
 		arr[i] = v;
+		free(buf);
 	}
 
 	fclose(fptr);
@@ -161,7 +162,7 @@ void RecognizeDigits() {
 
 	assert(trainingSize == labelSize);
 
-	Vector vectorLabels[labelSize];
+	Vector* vectorLabels = malloc(labelSize * sizeof(Vector));
 
 	for (int i = 0; i < labelSize; i++) {
 		vectorLabels[i] = generateVectorFromNumber(labels[i]);
@@ -182,39 +183,41 @@ void RecognizeDigits() {
 
 	for (int i = 0; i < EPOCH_AMOUNT; i++) {
 		
-		Vector sum = CreateVectorWithZeros(10);
-		int correctlyIdentified = 0;
-		
 		for (int i = 0; i < trainingSize / MINI_BATCH_SIZE; i++)
 			BackPropagate(network, trainingInputs + (i * MINI_BATCH_SIZE), vectorLabels + (i * MINI_BATCH_SIZE), MINI_BATCH_SIZE);
-		
-		for (int i = 0; i < trainingSize; i++) {
-			Vector feedForward = FeedForward(network, trainingInputs[i], 0);
-			Vector cost = vectorCost(vectorLabels[i], feedForward);
 
-			AddVectorsInPlace(cost, &sum);
-
-			if (getObservedDigit(feedForward) == getObservedDigit(vectorLabels[i]))
-					correctlyIdentified++;
-
-			FreeVector(&feedForward);
-			FreeVector(&cost);
-		}
-
-		ApplyScalarToVectorInPlace(&sum, 1.0 / (double)EPOCH_AMOUNT);
-
-		printf("Cost after epoch %d: %f, Percentage of training data correctly identified: %f%%.\n", i, VectorSum(sum),
-				((double)correctlyIdentified / (double)trainingSize) * 100.0);
-
-		FreeVector(&sum);
+		printf("Epoch %d completed.\n", i);
 	}
+
+	Vector sum = CreateVectorWithZeros(10);
+	int correctlyIdentified = 0;
+
+	for (int i = 0; i < trainingSize; i++) {
+		Vector feedForward = FeedForward(network, trainingInputs[i], 0);
+		Vector cost = vectorCost(vectorLabels[i], feedForward);
+
+		AddVectorsInPlace(cost, &sum);
+
+		if (getObservedDigit(feedForward) == getObservedDigit(vectorLabels[i]))
+				correctlyIdentified++;
+
+		FreeVector(&feedForward);
+		FreeVector(&cost);
+	}
+
+	ApplyScalarToVectorInPlace(&sum, 1.0 / (double)EPOCH_AMOUNT);
+
+	printf("Cost after training: %f, Percentage of training data correctly identified: %f%%.\n", VectorSum(sum),
+			((double)correctlyIdentified / (double)trainingSize) * 100.0);
+
+	FreeVector(&sum);
 
 	for (int i = 0; i < trainingSize; i++)
 		FreeVector(&trainingInputs[i]);
 
-
 	free(trainingInputs);
 	free(labels);
+	FreeVector(&vectorLabels);
 
 	FreeNetwork(&network);
 }

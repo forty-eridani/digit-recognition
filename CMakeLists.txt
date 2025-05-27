@@ -10,8 +10,10 @@ set(SOURCE_FILES ${COMPILE_DIR}/main.c
 			 	 ${COMPILE_DIR}/mnist.c)
 set(EXECUTABLE_NAME out)
 
+add_subdirectory(vendored/SDL EXCLUDE_FROM_ALL)
+
 include_directories(src/include linear-algebra-lib/src/include input)
 
 add_executable(${EXECUTABLE_NAME} ${SOURCE_FILES})
 
-target_link_libraries(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/libs/liblinear-algebra.a m)
+target_link_libraries(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/libs/liblinear-algebra.a m SDL3::SDL3)

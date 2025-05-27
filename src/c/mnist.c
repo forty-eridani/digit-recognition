@@ -212,12 +212,14 @@ void RecognizeDigits() {
 
 	FreeVector(&sum);
 
-	for (int i = 0; i < trainingSize; i++)
+	for (int i = 0; i < trainingSize; i++) {
 		FreeVector(&trainingInputs[i]);
+		FreeVector(&vectorLabels[i]);
+	}
 
 	free(trainingInputs);
 	free(labels);
-	FreeVector(&vectorLabels);
+	free(vectorLabels);
 
 	FreeNetwork(&network);
 }

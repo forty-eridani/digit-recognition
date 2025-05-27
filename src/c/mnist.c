@@ -8,10 +8,10 @@
 
 #include "network.h"
 
-#define EPOCH_AMOUNT 128
-#define MINI_BATCH_SIZE 100
+#define EPOCH_AMOUNT 50
+#define MINI_BATCH_SIZE 50
 
-#define LEARNING_RATE 5.0
+#define LEARNING_RATE 0.7
 
 static uint16_t swapLsb(uint16_t n) {
 	uint8_t most = n;
@@ -106,11 +106,11 @@ int8_t* readInputArray(const char* filename, int* size, int magicNumber) {
 	return arr;
 }
 
-void shuffleVectorArray(Vector* array, int size) {
+void shuffleIntArray(int* array, int size) {
 	for (int i = size - 1; i > 0; i--) {
 		int j = rand() % i;
 
-		Vector tmp = array[i];
+		int tmp = array[i];
 		array[i] = array[j];
 		array[j] = tmp;
 	}
@@ -118,6 +118,8 @@ void shuffleVectorArray(Vector* array, int size) {
 
 // Generates a 10 element vector where `n` represents the index of the element that is `1.0`
 Vector generateVectorFromNumber(int8_t n) {
+	if (n < 0 || n >= 10)
+		printf("%d\n", n);
 	assert(n >= 0 && n < 10);
 
 	Vector v = CreateVectorWithZeros(10);
@@ -158,14 +160,14 @@ void RecognizeDigits() {
 	
 	// Magic number is just info about how the data is stored
 	Vector* trainingInputs = readVectorFile("../input/train-images.idx3-ubyte", &trainingSize, 0x0803);
-	int8_t* labels = readInputArray("../input/train-labels.idx1-ubyte", &labelSize, 0x0801);
+	int8_t* trainingLabels = readInputArray("../input/train-labels.idx1-ubyte", &labelSize, 0x0801);
 
 	assert(trainingSize == labelSize);
 
-	Vector* vectorLabels = malloc(labelSize * sizeof(Vector));
+	Vector* trainingVectorLabels = malloc(labelSize * sizeof(Vector));
 
 	for (int i = 0; i < labelSize; i++) {
-		vectorLabels[i] = generateVectorFromNumber(labels[i]);
+		trainingVectorLabels[i] = generateVectorFromNumber(trainingLabels[i]);
 	}
 
 	// for (int i = 0; i < 28 * 28; i++)
@@ -174,17 +176,30 @@ void RecognizeDigits() {
 
 	srand(time(NULL));
 
-	shuffleVectorArray(trainingInputs, trainingSize);
-	shuffleVectorArray(vectorLabels, labelSize);
+	int indices[trainingSize];
 
 	int layers[] = {28 * 28, 16, 16, 10};
 
 	Network network = CreateNetwork(layers, 4, LEARNING_RATE);
 
 	for (int i = 0; i < EPOCH_AMOUNT; i++) {
+
+		for (int i = 0; i < trainingSize; i++)
+			indices[i] = i;
+
+		shuffleIntArray(indices, trainingSize);
 		
-		for (int i = 0; i < trainingSize / MINI_BATCH_SIZE; i++)
-			BackPropagate(network, trainingInputs + (i * MINI_BATCH_SIZE), vectorLabels + (i * MINI_BATCH_SIZE), MINI_BATCH_SIZE);
+		for (int i = 0; i < trainingSize / MINI_BATCH_SIZE; i++) {
+			Vector miniBatchImages[MINI_BATCH_SIZE];
+			Vector miniBatchLabels[MINI_BATCH_SIZE];
+
+			for (int j = 0; j < MINI_BATCH_SIZE; j++) {
+				miniBatchImages[j] = trainingInputs[indices[i * MINI_BATCH_SIZE + j]];
+				miniBatchLabels[j] = trainingVectorLabels[indices[i * MINI_BATCH_SIZE + j]];
+			}
+
+			BackPropagate(network, miniBatchImages, miniBatchLabels, MINI_BATCH_SIZE);
+		}
 
 		printf("Epoch %d completed.\n", i);
 	}
@@ -194,11 +209,11 @@ void RecognizeDigits() {
 
 	for (int i = 0; i < trainingSize; i++) {
 		Vector feedForward = FeedForward(network, trainingInputs[i], 0);
-		Vector cost = vectorCost(vectorLabels[i], feedForward);
+		Vector cost = vectorCost(trainingVectorLabels[i], feedForward);
 
 		AddVectorsInPlace(cost, &sum);
 
-		if (getObservedDigit(feedForward) == getObservedDigit(vectorLabels[i]))
+		if (getObservedDigit(feedForward) == getObservedDigit(trainingVectorLabels[i]))
 				correctlyIdentified++;
 
 		FreeVector(&feedForward);
@@ -212,12 +227,52 @@ void RecognizeDigits() {
 
 	FreeVector(&sum);
 
-	for (int i = 0; i < trainingSize; i++)
+	int testImageSize;
+	int testLabelSize;
+
+	Vector* testImages = readVectorFile("../input/t10k-images.idx3-ubyte", &testImageSize, 0x0803);
+	int8_t* testLabels = readInputArray("../input/t10k-labels.idx1-ubyte", &testLabelSize, 0x0801);
+
+	assert(testImageSize == testLabelSize);
+
+	printf("%d is size\n", testImageSize);
+
+	Vector* testVectorLabels = malloc(labelSize * sizeof(Vector));
+
+	for (int i = 0; i < testLabelSize ; i++) {
+		testVectorLabels[i] = generateVectorFromNumber(testLabels[i]);
+	}
+
+	correctlyIdentified = 0;
+
+	for (int i = 0; i < testImageSize; i++) {
+		Vector feedForward = FeedForward(network, testImages[i], 0);
+
+		if (getObservedDigit(feedForward) == getObservedDigit(testVectorLabels[i]))
+				correctlyIdentified++;
+
+		FreeVector(&feedForward);
+	}
+
+	printf("Correctly identified test labels: %f%%.\n", ((double)correctlyIdentified / (double)testImageSize) * 100.0);
+
+	for (int i = 0; i < trainingSize; i++) {
 		FreeVector(&trainingInputs[i]);
+		FreeVector(&trainingVectorLabels[i]);
+	}
+
+	for (int i = 0; i < testImageSize; i++) {
+		FreeVector(&testImages[i]);
+		FreeVector(&testVectorLabels[i]);
+	}
 
 	free(trainingInputs);
-	free(labels);
-	FreeVector(&vectorLabels);
+	free(trainingVectorLabels);
+	free(trainingLabels);
+	
+	free(testVectorLabels);
+	free(testLabels);
+	free(testImages);
 
 	FreeNetwork(&network);
 }

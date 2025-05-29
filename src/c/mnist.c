@@ -8,7 +8,7 @@
 
 #include "network.h"
 
-#define EPOCH_AMOUNT 50
+#define EPOCH_AMOUNT 1
 #define MINI_BATCH_SIZE 50
 
 #define LEARNING_RATE 0.7
@@ -255,6 +255,8 @@ void RecognizeDigits() {
 	}
 
 	printf("Correctly identified test labels: %f%%.\n", ((double)correctlyIdentified / (double)testImageSize) * 100.0);
+
+	SaveParametersToFile(network, "network.nn");
 
 	for (int i = 0; i < trainingSize; i++) {
 		FreeVector(&trainingInputs[i]);

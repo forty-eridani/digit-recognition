@@ -6,8 +6,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
+
+#define FILE_EXTENSION "nn"
+#define EMPTY_NETWORK (Network){.layers = NULL, .biases = NULL, .neuronLayerCount = -1, .inputSize = -1, .outputSize = -1, .learningRate = 0.0}
 
 #define EMPTY_VECTOR (Vector){.size = 0, .data = NULL}
 
@@ -337,6 +341,142 @@ void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutp
 	}
 
 	freeGradient(&avg);
+}
+
+void SaveParametersToFile(Network network, const char* filename) {
+
+	const char* ext = filename;
+
+	while (*ext != '\0') {
+		ext++;
+		if (*(ext - 1) == '.')
+			break;
+	}
+
+	if (*ext == '\0') {
+		printf("No provided file extension in '%s'.\n", filename);
+		return;
+	} else if (strcmp(ext, FILE_EXTENSION) != 0) {
+		printf("Invalid file extension '%s'.\n", ext);
+		return;
+	}
+
+	if (network.neuronLayerCount + 1 > UINT16_MAX || network.neuronLayerCount < 0) {
+		printf("Layer count of '%d' invalid to write to file.\n", network.neuronLayerCount + 1);
+		return;
+	}
+
+	if (network.inputSize > UINT16_MAX || network.outputSize > UINT16_MAX) {
+		printf("Input and/or output dimensions invalid for writing to file.\n");
+		return;
+	}
+
+	FILE* fptr = fopen(filename, "wb");
+
+	if (fptr == NULL) {
+		printf("Could not open file '%s'.\n", filename);
+	}
+
+	// Layer count, includes input
+	uint16_t layerCount = network.neuronLayerCount + 1;
+	fwrite(&layerCount, sizeof(uint16_t), 1, fptr);
+
+	printf("Layer count: %d\n", layerCount);
+
+	uint16_t buf[layerCount];
+	
+	buf[0] = network.inputSize;
+
+	for (int i = 1; i < layerCount; i++) {
+		if (network.layers[i - 1].rows > UINT16_MAX || network.layers[i - 1].rows > UINT16_MAX) {
+			printf("Neuron layer at index '%d' of invalid dimension of '%d'.\n", i + 1, network.layers[i].rows);
+			fclose(fptr);
+			return;
+		}
+
+		buf[i] = network.layers[i - 1].rows;
+	}
+
+	fwrite(buf, sizeof(uint16_t), layerCount, fptr);
+
+	for (int i = 0; i < layerCount - 1; i++) {
+		int size = network.biases[i].size;
+		printf("Size is %d\n", size);
+
+		fwrite(network.biases[i].data, sizeof(double), size, fptr);
+	}
+
+	for (int i = 0; i < layerCount - 1; i++) {
+		int size = network.layers[i].rows * network.layers[i].cols;
+
+		fwrite(network.layers[i].data, sizeof(double), size, fptr);
+	}
+
+	fwrite(&network.learningRate, sizeof(double), 1, fptr);
+
+	fclose(fptr);
+}
+
+Network LoadParametersFromFile(const char* filename) {
+	const char* ext = filename;
+
+	while (*ext != '\0') {
+		ext++;
+		if (*(ext - 1) == '.')
+			break;
+	}
+
+	if (*ext == '\0') {
+		printf("No provided file extension in '%s'.\n", filename);
+		return EMPTY_NETWORK;
+	} else if (strcmp(ext, FILE_EXTENSION) != 0) {
+		printf("Invalid file extension '%s'.\n", ext);
+		return EMPTY_NETWORK;
+	}
+
+	FILE* fptr = fopen(filename, "rb");
+
+	if (fptr == NULL) {
+		printf("Could not open file '%s'.\n", filename);
+		return EMPTY_NETWORK;
+	}
+
+	uint16_t layerCount;
+	fread(&layerCount, sizeof(uint16_t), 1, fptr);
+
+	uint16_t layerSizes[layerCount];
+
+	fread(layerSizes, sizeof(uint16_t), layerCount, fptr);
+
+	Vector* biases = malloc((layerCount - 1) * sizeof(Vector));
+	Matrix* layers = malloc((layerCount - 1) * sizeof(Matrix));
+
+	for (int i = 1; i < layerCount; i++) {
+		double buf[layerSizes[i]];
+		fread(buf, sizeof(double), layerSizes[i], fptr);
+
+		biases[i - 1] = CreateVector(buf, layerSizes[i]);
+	}
+
+	for (int i = 1; i < layerCount; i++) {
+		// This data should be a matrix
+		int matrixSize = layerSizes[i - 1] * layerSizes[i];
+		double buf[matrixSize];
+		fread(buf, sizeof(double), matrixSize, fptr);
+
+		layers[i - 1] = CreateMatrix(buf, layerSizes[i], layerSizes[i - 1]);
+	}
+
+	double learningRate;
+	fread(&learningRate, sizeof(double), 1, fptr);
+
+	fclose(fptr);
+
+	int inputSize = layers[0].cols;
+	int outputSize = layers[layerCount - 1].rows;
+
+	return (Network){.layers = layers, .biases = biases, .neuronLayerCount = layerCount - 1, 
+		.outputSize = outputSize, .inputSize = inputSize, .learningRate = learningRate};
 }
 
 void FreeNetwork(Network* network) {

@@ -32,6 +32,12 @@ Vector FeedForward(Network network, Vector input, int currentLayer);
 // Back propagate with the given array of training inputs and expected outputs
 void BackPropagate(Network network, Vector* trainingInputs, Vector* expectedOutputs, int count);
 
+// Save the weights and biases and layers to a file in a custom binary format
+void SaveParametersToFile(Network network, const char* filename);
+
+// Loads the weights and biases and contructs the network from them
+Network LoadParametersFromFile(const char* filename);
+
 // Frees the memory in the network and sets all 
 void FreeNetwork(Network* network);
 

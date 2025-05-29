@@ -9,7 +9,7 @@
 #include "mnist.h"
 
 #define POINT_TRAIN_AMOUNT 1024
-#define POINT_TEST_AMOUNT 1024 
+#define POINT_TEST_AMOUNT 1024
 
 #define MAX_DISTANCE 1.0
 #define THRESHOLD_DISTANCE 0.5
@@ -17,7 +17,7 @@
 #define PI 3.141592653589793
 
 #define MINI_BATCH_SIZE 16
-#define EPOCH_COUNT 1000
+#define EPOCH_COUNT 2048 
 
 double RaiseToTwo(double x) {
 	return x * x;
@@ -50,6 +50,28 @@ double ComputeTotalCost(Vector expected, Vector observed) {
 	return sum;
 }
 
+void GeneratePoints(Vector inputs[], Vector outputs[], int size) {
+	static const double innerClass[] = {0.0, 1.0};
+	static const double outerClass[] = {1.0, 0.0};
+
+	for (int i = 0; i < size; i++) {
+		double distance = ((double)rand() / RAND_MAX) * MAX_DISTANCE;
+		double angle = ((double)rand() / RAND_MAX) * 2 * PI;
+
+		const double vectorArray[2] = {
+			distance * cos(angle),
+			distance * sin(angle)
+		};
+
+		inputs[i] = CreateVector(vectorArray, 2);
+
+		if (distance > THRESHOLD_DISTANCE) 
+			outputs[i] = CreateVector(outerClass, 2);
+		else 
+			outputs[i] = CreateVector(innerClass, 2);
+	}
+}
+
 // A little test program that will utilize the neural network to classify points
 void PointClassification() {
 	srand(time(NULL));
@@ -60,44 +82,10 @@ void PointClassification() {
 	Vector testPointInputs[POINT_TRAIN_AMOUNT];
 	Vector testPointOuputs[POINT_TRAIN_AMOUNT];
 
-	const double innerClass[] = {0.0, 1.0};
-	const double outerClass[] = {1.0, 0.0};
+	GeneratePoints(trainingPointInputs, trainingPointOutputs, POINT_TRAIN_AMOUNT);
+	GeneratePoints(testPointInputs, testPointOuputs, POINT_TEST_AMOUNT);
 
-	for (int i = 0; i < POINT_TRAIN_AMOUNT; i++) {
-		double distance = ((double)rand() / RAND_MAX) * MAX_DISTANCE;
-		double angle = ((double)rand() / RAND_MAX) * 2 * PI;
-
-		const double vectorArray[2] = {
-			distance * cos(angle),
-			distance * sin(angle)
-		};
-
-		trainingPointInputs[i] = CreateVector(vectorArray, 2);
-
-		if (distance > THRESHOLD_DISTANCE) 
-			trainingPointOutputs[i] = CreateVector(outerClass, 2);
-		else 
-			trainingPointOutputs[i] = CreateVector(innerClass, 2);
-	}
-
-	for (int i = 0; i < POINT_TEST_AMOUNT; i++) {
-		double distance = ((double)rand() / RAND_MAX) * MAX_DISTANCE;
-		double angle = ((double)rand() / RAND_MAX) * 2 * PI;
-
-		const double vectorArray[2] = {
-			distance * cos(angle),
-			distance * sin(angle)
-		};
-
-		testPointInputs[i] = CreateVector(vectorArray, 2);
-
-		if (distance > THRESHOLD_DISTANCE) 
-			testPointOuputs[i] = CreateVector(outerClass, 2);
-		else 
-			testPointOuputs[i] = CreateVector(innerClass, 2);
-	}
-
-	int layers[] = {2, 5, 5, 2};
+	int layers[] = {2, 10, 10, 2};
 
 	Network network = CreateNetwork(layers, 4, 0.4);
 
@@ -153,6 +141,12 @@ void PointClassification() {
 
 	printf("Percentage of testing data correctly identified: %f%%\n", ((double)correctlyIdentified / (double)POINT_TRAIN_AMOUNT) * 100.0);
 
+	SaveParametersToFile(network, "network.nn");
+
+	for (int i = 0; i < network.neuronLayerCount; i++) {
+		PrintVector(network.biases[i]);
+	}
+
 	FreeNetwork(&network);
 
 	for (int i = 0; i < POINT_TRAIN_AMOUNT; i++) {
@@ -183,5 +177,37 @@ int main() {
 	
 	// PointClassification();
 	
-	RecognizeDigits();
+	srand(time(NULL));
+	
+	Vector inputs[POINT_TEST_AMOUNT];
+	Vector outputs[POINT_TEST_AMOUNT];
+
+	GeneratePoints(inputs, outputs, POINT_TEST_AMOUNT);
+
+	Network network = LoadParametersFromFile("network.nn");
+
+	int correct = 0;
+	for (int i = 0; i < POINT_TEST_AMOUNT; i++) {
+		Vector output = FeedForward(network, inputs[i], 0);
+		Vector expectedOutput = outputs[i];
+
+		if ((expectedOutput.data[0] > expectedOutput.data[1] && output.data[0] > output.data[1])
+			|| (expectedOutput.data[0] < expectedOutput.data[1] && output.data[0] < output.data[1]))
+			correct++;
+
+		FreeVector(&output);
+	}
+
+	printf("%d is neuron layer count.\n", network.neuronLayerCount);
+
+	FreeNetwork(&network);
+
+	for (int i = 0; i < POINT_TEST_AMOUNT; i++) {
+		FreeVector(&inputs[i]);
+		FreeVector(&outputs[i]);
+	}
+
+	printf("Correctly recognized: %f%%\n", ((double)correct / (double)POINT_TEST_AMOUNT) * 100);
+
+	// RecognizeDigits();
 }
